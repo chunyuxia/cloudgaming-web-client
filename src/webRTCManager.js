@@ -1,3 +1,5 @@
+import { LatencyDecoder } from "./latencyDecoder.js";
+
 // Helper for signaling message types (equivalent to C# enum)
 const SignalingMessageType = {
   NEWPEER: "NEWPEER",
@@ -72,6 +74,14 @@ class WebRTCManager {
     // For browser: peerId -> { videoElement: HTMLVideoElement, audioElement: HTMLAudioElement }
     this.mediaElements = new Map();
     this.localStream = null; // Store local media stream if any
+
+    // Latency instrumentation: peerId -> Map<rtpTimestamp, { t5, unityMeta }>
+    // T5 recorded in encoded transform (frame received, before decode),
+    // matched against T7 in requestVideoFrameCallback via rtpTimestamp.
+    this.latencySamples = new Map();
+
+    // Parallel WebCodecs decoder per peer for T6_para measurement.
+    this.latencyDecoders = new Map();
   }
 
   async connect(webSocketUrl, isVideoAudioSender, isVideoAudioReceiver) {
@@ -83,7 +93,6 @@ class WebRTCManager {
       console.warn("WebSocket connection attempt already in progress.");
       return;
     }
-
     this.isWebSocketConnectionInProgress = true;
     this.isLocalPeerVideoAudioSender = isVideoAudioSender;
     this.isLocalPeerVideoAudioReceiver = isVideoAudioReceiver;
@@ -287,6 +296,7 @@ class WebRTCManager {
       if (kind === "video" && mediaPeerBundle.videoElement) {
         mediaPeerBundle.videoElement.srcObject = remoteStream;
         mediaPeerBundle.videoElement.play().catch((e) => console.error("Video play failed:", e));
+        this._setupRenderedFrameTracking(peerId, mediaPeerBundle.videoElement);
         this.onVideoStreamEstablished?.(peerId, remoteStream);
       }
 
@@ -346,8 +356,58 @@ class WebRTCManager {
     const { readable, writable } = receiver.createEncodedStreams();
     const textDecoder = new TextDecoder();
 
+    // Per-peer latency sample map for T5↔T7 correlation via rtpTimestamp.
+    if (!this.latencySamples.has(peerId)) {
+      this.latencySamples.set(peerId, new Map());
+    }
+    const samples = this.latencySamples.get(peerId);
+
+    // TEMP smoke-test: store t5 on every frame even without Unity metadata,
+    // so rVFC has something to correlate in Chrome↔Chrome tests.
+    // Set to false when testing against the real Unity host.
+    const LATENCY_SMOKE_TEST = false;
+
+    // Parallel WebCodecs decoder for this peer. onT6 fires when DIY decoder finishes;
+    // we tag t6_para into the matching samples entry.
+    if (!this.latencyDecoders.has(peerId)) {
+      const decoder = new LatencyDecoder({
+        peerId,
+        onT6: (rtpTs, t6) => {
+          const entry = samples.get(rtpTs);
+          if (entry && entry.t6_para == null) entry.t6_para = t6;
+        },
+      });
+      this.latencyDecoders.set(peerId, decoder);
+      decoder.autoConfigureFromReceiver(receiver);
+    }
+    const latencyDecoder = this.latencyDecoders.get(peerId);
+      
+    let lastStoredT0 = null;
+
     const transformStream = new TransformStream({
       transform: (chunk, controller) => {
+        // T5 (per mentor's definition): decoder entry time — frame has passed reassembly
+        // + jitter buffer and is about to enter the decoder. This is what "Frame fully
+        // received by client" maps to in our pipeline.
+        const t5 = Date.now();
+        let rtpTimestamp = null;
+        try {
+          const frameMeta = typeof chunk.getMetadata === "function" ? chunk.getMetadata() : null;
+          if (frameMeta && frameMeta.rtpTimestamp != null) {
+            rtpTimestamp = frameMeta.rtpTimestamp;
+          }
+        } catch (e) {
+          // getMetadata may throw on older Chrome; safe to ignore
+        }
+
+        if (LATENCY_SMOKE_TEST && rtpTimestamp != null) {
+          samples.set(rtpTimestamp, { t5, unityMeta: null });
+          if (samples.size > 500) {
+            const oldestKey = samples.keys().next().value;
+            samples.delete(oldestKey);
+          }
+        }
+
         if (!(chunk.data instanceof ArrayBuffer)) {
           controller.enqueue(chunk);
           return;
@@ -362,7 +422,8 @@ class WebRTCManager {
         // Layout from Unity: [encodedVideo | metadata | metaLen]
         const metaLen = data[data.length - 1];
         if (metaLen === 0) {
-          // no metadata on this frame
+          // no metadata — pure video, safe to feed parallel decoder
+          latencyDecoder?.feed({ type: chunk.type, data: chunk.data, rtpTimestamp });
           controller.enqueue(chunk);
           return;
         }
@@ -399,10 +460,40 @@ class WebRTCManager {
           }
         }
 
+        // Store T5 sample for later T6/T7 correlation in rVFC.
+        // Keyed by rtpTimestamp so the rVFC callback can look up the matching encoded frame.
+        if (rtpTimestamp != null && metadataText) {
+          try {
+            const unityMeta = JSON.parse(metadataText);
+            if (unityMeta && unityMeta.kind === "latencySample") {
+                if (unityMeta.t0 != lastStoredT0) {
+                    lastStoredT0 = unityMeta.t0;
+                    samples.set(rtpTimestamp, { t5, unityMeta });
+                    // Evict oldest entries to keep memory bounded
+                    if (samples.size > 500) {
+                      samples.delete(samples.keys().next().value);
+                    }
+                  }
+                
+//              samples.set(rtpTimestamp, { t5, unityMeta });
+//              // Bounded-size eviction: drop oldest if we get too many un-matched entries
+//              if (samples.size > 500) {
+//                const oldestKey = samples.keys().next().value;
+//                samples.delete(oldestKey);
+//              }
+            }
+          } catch {
+            // metadata is not JSON — skip correlation for this frame
+          }
+        }
+
         // Strip metadata before decoding (so VP8 decoder sees only valid bitstream)
         const stripped = new Uint8Array(videoLen);
         stripped.set(videoBytes);
         chunk.data = stripped.buffer;
+
+        // Feed stripped bytes to parallel decoder for T6_para measurement.
+        latencyDecoder?.feed({ type: chunk.type, data: chunk.data, rtpTimestamp });
 
         controller.enqueue(chunk);
       },
@@ -412,6 +503,105 @@ class WebRTCManager {
       .pipeThrough(transformStream)
       .pipeTo(writable)
       .catch((err) => console.error("[EncodedTransform] Pipe error for", peerId, err));
+  }
+
+  // T7: frame rendered on client.
+  // requestVideoFrameCallback fires when the UA has submitted a frame for composition.
+  // metadata.rtpTimestamp lets us match back to the T5 sample stored in the encoded transform.
+  _setupRenderedFrameTracking(peerId, videoElement) {
+    if (!videoElement || typeof videoElement.requestVideoFrameCallback !== "function") {
+      console.warn("[rVFC] requestVideoFrameCallback not supported on this video element.");
+      return;
+    }
+    if (videoElement._rvfcActive) return; // already tracking this element
+    videoElement._rvfcActive = true;
+
+    const samples = this.latencySamples.get(peerId);
+
+    const onFrame = (_now, metadata) => {
+      if (!videoElement._rvfcActive) return; // stopped by cleanup
+
+      const rtpTs = metadata.rtpTimestamp;
+      if (rtpTs != null && samples && samples.has(rtpTs)) {
+        const entry = samples.get(rtpTs);
+        const { t5, unityMeta, t6_para } = entry;
+        samples.delete(rtpTs);
+
+        // Two T6 candidates:
+        //   T6_para  = parallel WebCodecs decoder output time (latencyDecoder)
+        //   T6_procd = T5 + processingDuration (from rVFC metadata)
+        // Three T7 candidates:
+        //   T7_cb    = rVFC callback fire time   (Date.now in JS, has dispatch jitter)
+        //   T7_pres  = metadata.presentationTime (precise submit-to-compositor)
+        //   T7_disp  = metadata.expectedDisplayTime (estimated time-on-screen)
+        const procDur  = metadata.processingDuration;
+        const presHi   = metadata.presentationTime;
+        const dispHi   = metadata.expectedDisplayTime;
+
+        const t7_cb    = Date.now();
+        const t7_pres  = (typeof presHi  === "number") ? Math.round(performance.timeOrigin + presHi)  : null;
+        const t7_disp  = (typeof dispHi  === "number") ? Math.round(performance.timeOrigin + dispHi)  : null;
+        const t6_procd = (typeof procDur === "number") ? Math.round(t5 + procDur * 1000)              : null;
+
+        // Unity-side timestamps (may be absent in Chrome↔Chrome smoke test).
+        const u1 = unityMeta?.t0;
+        const u2 = unityMeta?.t1;
+        const u3 = unityMeta?.t2;
+        const u4 = unityMeta?.t3;
+        const u4m = unityMeta?.t4;
+
+        const lines = [];
+        lines.push(`[Latency] peer=${peerId} rtp=${rtpTs}`);
+
+        if (u1 != null || u2 != null || u3 != null || u4 != null || u4m != null) {
+          const up = [];
+          if (u1  != null) up.push(`T1=${u1}`);
+          if (u2  != null) up.push(`T2=${u2}`);
+          if (u3  != null) up.push(`T3=${u3}`);
+          if (u4  != null) up.push(`T4=${u4}`);
+          if (u4m != null) up.push(`T4m=${u4m}`);
+          lines.push(`  Unity:     ${up.join("  ")}`);
+        }
+
+        const fmtRow = (label, val) => {
+          if (val == null) return `  ${label.padEnd(8)} = (unavailable)`;
+          const delta = val - t5;
+          const deltaStr = String(delta).padStart(4);
+          return `  ${label.padEnd(8)} = ${val}    (${label.padEnd(8)} - T5 = ${deltaStr} ms)`;
+        };
+
+        lines.push(`  T5       = ${t5}`);
+        lines.push(fmtRow("T6_para",  t6_para));
+        lines.push(fmtRow("T6_procd", t6_procd));
+        lines.push(fmtRow("T7_cb",    t7_cb));
+        lines.push(fmtRow("T7_pres",  t7_pres));
+        lines.push(fmtRow("T7_disp",  t7_disp));
+
+        if (typeof procDur === "number") {
+          lines.push(`  procDur  = ${(procDur * 1000).toFixed(2)} ms`);
+        }
+
+        // Re-bind for unity e2e block below (was named differently in old version).
+        const t0 = u1;
+
+        // --- Unity end-to-end ---
+        if (t0 != null) {
+          const e2eParts = [`T5 =${t5 - t0}ms`];
+          if (t7_cb != null) e2eParts.push(`T7_cb=${t7_cb - t0}ms`);
+          if (t7_pres != null) e2eParts.push(`T7_pres=${t7_pres - t0}ms`);
+          if (t7_disp != null) e2eParts.push(`T7_disp=${t7_disp - t0}ms`);
+          lines.push(`  ---`);
+          lines.push(`  e2e (Tx-T1): ${e2eParts.join("  ")}`);
+        }
+
+        console.log(lines.join("\n"));
+      }
+
+      videoElement.requestVideoFrameCallback(onFrame);
+    };
+
+    videoElement.requestVideoFrameCallback(onFrame);
+    console.log(`[rVFC] Rendered-frame tracking started for ${peerId}`);
   }
 
   async handleMessage(data) {
@@ -773,6 +963,7 @@ class WebRTCManager {
         mediaPeerBundle.remoteStream = null;
       }
       if (mediaPeerBundle.videoElement) {
+        mediaPeerBundle.videoElement._rvfcActive = false;
         mediaPeerBundle.videoElement.pause();
         mediaPeerBundle.videoElement.srcObject = null;
         mediaPeerBundle.videoElement.remove();
@@ -783,6 +974,14 @@ class WebRTCManager {
         mediaPeerBundle.audioElement.remove();
       }
       this.mediaElements.delete(peerId);
+    }
+
+    this.latencySamples.delete(peerId);
+
+    const ld = this.latencyDecoders.get(peerId);
+    if (ld) {
+      ld.close();
+      this.latencyDecoders.delete(peerId);
     }
 
     console.log(`Cleaned up resources for peer ${peerId}`);
@@ -798,10 +997,14 @@ class WebRTCManager {
     this.videoTrackSenders.clear();
     this.audioTrackSenders.clear();
     this.mediaElements.forEach((els) => {
+      if (els.videoElement) els.videoElement._rvfcActive = false;
       els.videoElement?.remove();
       els.audioElement?.remove();
     });
     this.mediaElements.clear();
+    this.latencySamples.clear();
+    this.latencyDecoders.forEach((ld) => ld.close());
+    this.latencyDecoders.clear();
     console.log("All peer resources cleaned up.");
   }
 
