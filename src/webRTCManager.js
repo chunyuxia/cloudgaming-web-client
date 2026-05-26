@@ -595,6 +595,21 @@ class WebRTCManager {
         }
 
         console.log(lines.join("\n"));
+          
+          // ── Send e2e latency report back to Unity ──────────────────
+          if (t0 != null) {
+            const report = JSON.stringify({
+              kind:      "latencyReport",
+              t0,
+              T5:        t5 - t0,
+              T6: typeof procDur === "number"
+                           ? parseFloat((procDur * 1000).toFixed(2))
+                           : null,
+              T7_pres:   t7_pres != null ? t7_pres - t5 : null,
+              T7_disp:   t7_disp != null ? t7_disp - t5 : null,
+            });
+            this.sendViaDataChannel(report, peerId);
+          }
       }
 
       videoElement.requestVideoFrameCallback(onFrame);
