@@ -1,6 +1,5 @@
 import { WebRTCManager } from "./webRTCManager.js";
 
-
 const websocketUrlInput = document.getElementById("websocketUrl");
 const localPeerIdInput = document.getElementById("localPeerId");
 const stunServerInput = document.getElementById("stunServer");
@@ -223,7 +222,7 @@ startLatencyBtn.addEventListener("click", () => {
     });
 
     webRTCManager.sendViaDataChannel(msg, targetId);
-  }, 500); // send every 500ms; adjust as you like
+  }, 200); // send every 500ms; adjust as you like
 
   console.log("Latency test started.");
 });
