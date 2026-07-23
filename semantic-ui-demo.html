@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Semantic UI vs Video-Streamed UI — Cloud Gaming Prototype</title>
+    <style>
+      :root {
+        --bg: #0b1117;
+        --panel: #121b24;
+        --line: #243443;
+        --text: #d7e3ee;
+        --muted: #8aa0b2;
+        --accent: #37e0a0;
+        --accent2: #49b6ff;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 24px;
+        font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      .wrap { max-width: 1040px; margin: 0 auto; }
+      h1 { font-size: 20px; margin: 0 0 4px; }
+      .sub { color: var(--muted); font-size: 13px; margin: 0 0 20px; line-height: 1.5; }
+      .sub b { color: var(--text); }
+
+      /* Controls */
+      .controls {
+        display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+        background: var(--panel); border: 1px solid var(--line);
+        border-radius: 10px; padding: 14px 16px; margin-bottom: 18px;
+      }
+      .controls label { font-size: 13px; color: var(--muted); font-weight: 600; }
+      input[type="range"] { width: 280px; accent-color: var(--accent); }
+      #qualityLabel {
+        font-variant-numeric: tabular-nums; font-weight: 700;
+        min-width: 130px; display: inline-block;
+      }
+      .presets { display: flex; gap: 8px; margin-left: auto; }
+      .presets button {
+        background: #1c2a36; color: var(--text); border: 1px solid var(--line);
+        border-radius: 6px; padding: 7px 12px; cursor: pointer; font-size: 12px;
+      }
+      .presets button:hover { border-color: var(--accent); color: var(--accent); }
+
+      /* Panels */
+      .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+      @media (max-width: 880px) { .panels { grid-template-columns: 1fr; } }
+      .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+      .panel h2 { font-size: 13px; margin: 0; padding: 12px 14px 4px; }
+      .panel .tag { padding: 0 14px 10px; font-size: 12px; color: var(--muted); }
+      .panel.bad h2 { color: #ff7a7a; }
+      .panel.good h2 { color: var(--accent); }
+
+      .stage { position: relative; aspect-ratio: 16 / 9; background: #000; }
+      .stage canvas {
+        position: absolute; inset: 0; width: 100%; height: 100%;
+        display: block; image-rendering: auto;
+      }
+      /* Semantic overlay sits crisp on top of the (degraded) video. */
+      #semanticOverlay { position: absolute; inset: 0; pointer-events: none; font-family: inherit; }
+
+      /* HUD pieces — pure DOM/SVG, rendered locally from received metadata */
+      .hud-tl { position: absolute; top: 10px; left: 12px; }
+      .hud-bar { width: 140px; height: 9px; background: #0a2a20; border: 1px solid rgba(255,255,255,.4); border-radius: 2px; overflow: hidden; margin-bottom: 3px; }
+      .hud-bar.sm { height: 7px; background: #0a2030; }
+      .hud-fill { height: 100%; }
+      .hud-fill.hp { background: var(--accent); }
+      .hud-fill.sh { background: var(--accent2); }
+      .hud-name { font-weight: 700; font-size: 12px; margin-top: 4px; text-shadow: 0 1px 2px #000; }
+      .hud-sub { font-size: 10px; color: #b9ccda; text-shadow: 0 1px 2px #000; }
+
+      .hud-tc {
+        position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
+        background: rgba(0,0,0,.45); color: #9fe8ff; font-weight: 700; font-size: 11px;
+        padding: 4px 10px; border-radius: 4px; white-space: nowrap;
+      }
+      .hud-tr { position: absolute; top: 10px; right: 12px; text-align: right; }
+      .hud-score { font-weight: 800; font-size: 16px; color: #ffd54a; text-shadow: 0 1px 2px #000; }
+      .hud-fps { font-size: 10px; color: var(--muted); margin-top: 2px; }
+
+      .hud-map {
+        position: absolute; top: 56px; right: 12px; width: 64px; height: 64px;
+        background: rgba(0,0,0,.5); border: 1px solid rgba(120,200,230,.7);
+      }
+      .hud-notif {
+        position: absolute; top: 34%; left: 50%; transform: translateX(-50%);
+        color: #ff6a6a; font-weight: 800; font-size: 22px; letter-spacing: 1px;
+        text-shadow: 0 2px 6px #000; opacity: 0; transition: opacity .15s;
+      }
+      .hud-coords { position: absolute; bottom: 12px; left: 12px; font-family: ui-monospace, monospace; font-size: 11px; color: #7fffc4; text-shadow: 0 1px 2px #000; }
+      .hud-ammo { position: absolute; bottom: 10px; right: 14px; font-size: 13px; color: #9bb; text-shadow: 0 1px 2px #000; }
+      .hud-ammo b { font-size: 20px; color: #fff; }
+      .hud-hotbar { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); display: flex; gap: 4px; }
+      .hud-hotbar .slot {
+        width: 42px; height: 26px; background: rgba(20,40,50,.8); border: 1px solid rgba(255,255,255,.15);
+        border-radius: 4px; padding: 2px 4px; color: #cde;
+      }
+      .hud-hotbar .slot.sel { background: rgba(55,224,160,.85); color: #012; border-color: var(--accent); }
+      .hud-hotbar .k { display: block; font-weight: 800; font-size: 9px; line-height: 1; }
+      .hud-hotbar .n { display: block; font-size: 7px; line-height: 1.4; white-space: nowrap; overflow: hidden; }
+
+      /* Metrics */
+      .metrics {
+        display: flex; gap: 24px; flex-wrap: wrap; margin-top: 18px;
+        background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px;
+        font-size: 13px;
+      }
+      .metrics .m b { color: var(--text); font-variant-numeric: tabular-nums; }
+      .metrics .m span { color: var(--muted); }
+      #dcStatus { color: #c97; }
+      #dcStatus.ok { color: var(--accent); }
+      .legend { font-size: 12px; color: var(--muted); margin-top: 14px; line-height: 1.6; }
+      .legend b { color: var(--text); }
+      a { color: var(--accent2); }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>Semantic UI vs. Video-Streamed UI</h1>
+      <p class="sub">
+        Both panels show the <b>same cloud-gaming video stream</b>, degraded identically by the
+        <b>Network quality</b> slider. <b>Left:</b> the UI is baked into the video pixels (traditional).
+        <b>Right:</b> the server sends UI state as JSON over a real WebRTC <b>data channel</b>, and the
+        client renders it locally as crisp DOM/SVG on top of the video. Drag quality down and watch the
+        left HUD dissolve while the right HUD stays sharp.
+      </p>
+
+      <div class="controls">
+        <label for="quality">Network quality</label>
+        <input type="range" id="quality" min="2" max="100" value="100" />
+        <span id="qualityLabel"></span>
+        <div class="presets">
+          <button data-preset="100">Fiber</button>
+          <button data-preset="55">3G</button>
+          <button data-preset="18">Congested</button>
+          <button data-preset="6">Critical</button>
+        </div>
+      </div>
+
+      <div class="panels">
+        <div class="panel bad">
+          <h2>① Traditional — UI baked into the video</h2>
+          <div class="tag">HUD is part of the encoded pixels → degrades with the stream.</div>
+          <div class="stage">
+            <canvas id="videoCanvasL"></canvas>
+          </div>
+        </div>
+
+        <div class="panel good">
+          <h2>② Semantic UI — rendered locally from the data channel</h2>
+          <div class="tag">Video carries only the game world; HUD is drawn client-side from metadata.</div>
+          <div class="stage">
+            <canvas id="videoCanvasR"></canvas>
+            <div id="semanticOverlay"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="metrics">
+        <div class="m"><span>Transport:</span> <b id="dcStatus">● connecting…</b></div>
+        <div class="m"><span>Video bitrate (sim):</span> <b id="videoKbps">0</b> <span>kbps</span></div>
+        <div class="m"><span>UI metadata:</span> <b id="metaKbps">0</b> <span>kbps</span></div>
+        <div class="m"><span>Frames received over channel:</span> <b id="seqCount">0</b></div>
+      </div>
+
+      <p class="legend">
+        <b>Why this is convincing:</b> the right-hand HUD is built <i>only</i> from JSON that arrives on the
+        RTCDataChannel (<code>ui-metadata</code>) — it never touches the video codec, so resolution loss and
+        compression blur cannot affect it. Notice the UI metadata costs a tiny fraction of the video bitrate, yet
+        stays perfectly legible at network levels where the baked-in UI is unreadable.
+      </p>
+      <p class="legend">
+        Maps directly onto this client's existing path: the server would
+        <code>sendViaDataChannel(JSON.stringify(uiState))</code> and the client renders it in
+        <code>onDataChannelMessageReceived</code> — see <code>src/webRTCManager.js</code>.
+      </p>
+    </div>
+
+    <script type="module" src="./src/semanticUiDemo.js"></script>
+  </body>
+</html>
