@@ -240,3 +240,22 @@ select:focus {
   border-top: max(1px, calc(var(--u) * 0.4)) solid rgba(255, 255, 255, 0.12);
   padding-top: calc(var(--u) * 2.5);
 }
+
+/* Unity WebGL UI overlay: browser receives semantic JSON, Unity WebGL renders UI locally. */
+.unity-webgl-ui-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  overflow: hidden;
+  background: transparent;
+}
+.unity-webgl-ui-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  background: transparent;
+}
+.video-stage.ui-world-compositor .unity-webgl-ui-layer {
+  z-index: 5;
+}

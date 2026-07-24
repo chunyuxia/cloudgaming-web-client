@@ -42,6 +42,23 @@ Peer role matching can be overridden with URL parameters:
 ?game=unchained
 ```
 
+
+## Unity WebGL UI Overlay
+
+The web client can also render the semantic UI locally inside the browser with a Unity WebGL UI client. Build the SmokeBreak UI client from Unity into:
+
+```text
+public/smokebreak-ui-webgl
+```
+
+Then open the web client with:
+
+```text
+?unityUi=1&game=smokebreak
+```
+
+In this mode the browser receives the cloud world video and forwards semantic UI JSON into the embedded Unity WebGL canvas. This removes the separate local UI-video stream and is the preferred mobile-browser direction.
+
 ## GitHub Pages
 
 This repository includes a GitHub Actions workflow that builds the Vite app and deploys it to GitHub Pages. After pushing to GitHub, enable Pages with **Source: GitHub Actions** in the repository settings if GitHub does not enable it automatically.

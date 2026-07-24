@@ -7,6 +7,12 @@ function splitMatcher(value, fallback) {
     .filter(Boolean);
 }
 
+function boolParam(name, defaultValue = false) {
+  const value = params.get(name);
+  if (value == null) return defaultValue;
+  return ["1", "true", "yes", "on"].includes(value.toLowerCase());
+}
+
 export const UI_OFFLOAD_CONFIG = {
   worldPeerMatch: splitMatcher(
     params.get("worldPeerMatch") || params.get("worldPeer"),
@@ -19,6 +25,11 @@ export const UI_OFFLOAD_CONFIG = {
   uiBlendMode: params.get("uiBlendMode") || "screen",
   fallbackAssignment: params.get("uiOffloadFallback") !== "false",
   renderDataUi: params.get("renderDataUi") !== "false",
+  unityWebglUi: boolParam("unityUi", false),
+  unityUiBuildUrl: params.get("unityUiBuildUrl") || "./smokebreak-ui-webgl/Build",
+  unityUiBuildName: params.get("unityUiBuildName") || "SmokeBreakUIClientWebGL",
+  unityUiBridgeObject: params.get("unityUiBridgeObject") || "SemanticUiBridge",
+  unityUiBlendMode: params.get("unityUiBlendMode") || "screen",
 };
 
 function matchesMatcher(peerId, matcher) {

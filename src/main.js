@@ -2,6 +2,7 @@ import { WebRTCManager } from "./webRTCManager.js";
 import { UiOverlayRenderer } from "./uiOverlay/UiOverlayRenderer.js";
 import { UI_OFFLOAD_CONFIG, matchUiOffloadPeerRole } from "./config.js";
 import { UiWorldCompositor } from "./compositor/UiWorldCompositor.js";
+import { UnityWebGLUiOverlay } from "./unityWebgl/UnityWebGLUiOverlay.js";
 
 // Which game's exported UI assets to load. Override with ?game=smokebreak in the URL.
 const GAME = new URLSearchParams(location.search).get("game") || "unchained";
@@ -10,6 +11,14 @@ const GAME = new URLSearchParams(location.search).get("game") || "unchained";
 // popup path uses, so both render over the stream and scale with it.
 const uiRenderer = new UiOverlayRenderer({ getStage: () => ensureStage(), game: GAME });
 const uiWorldCompositor = new UiWorldCompositor(UI_OFFLOAD_CONFIG);
+const unityWebGLUiOverlay = new UnityWebGLUiOverlay({
+  enabled: UI_OFFLOAD_CONFIG.unityWebglUi,
+  getStage: () => ensureStage(),
+  buildUrl: UI_OFFLOAD_CONFIG.unityUiBuildUrl,
+  buildName: UI_OFFLOAD_CONFIG.unityUiBuildName,
+  bridgeObject: UI_OFFLOAD_CONFIG.unityUiBridgeObject,
+  blendMode: UI_OFFLOAD_CONFIG.unityUiBlendMode,
+});
 const uiOffloadPeerRoles = new Map();
 
 // Debug/manual handle for the UI-offload compositor. Lets you inspect roles and
@@ -25,6 +34,7 @@ window.uiOffload = {
   status: () => uiOffloadStatus(),
   remerge: () => remergeExistingVideos(),
   forceMerge: (worldPeerId, uiPeerId) => forceMergeStreams(worldPeerId, uiPeerId),
+  unityUi: unityWebGLUiOverlay,
 };
 
 const websocketUrlInput = document.getElementById("websocketUrl");
@@ -39,6 +49,7 @@ const startMediaBtn = document.getElementById("startMediaBtn");
 const stopMediaBtn = document.getElementById("stopMediaBtn");
 const initiateOffersBtn = document.getElementById("initiateOffersBtn");
 const closeWebRTCBtn = document.getElementById("closeWebRTCBtn");
+const loadUnityUiBtn = document.getElementById("loadUnityUiBtn");
 
 const localVideoPlayer = document.getElementById("localVideoPlayer");
 // const remoteVideosContainer = document.getElementById("remoteVideosContainer");
@@ -223,6 +234,11 @@ document.getElementById("mergeStreamsBtn")?.addEventListener("click", () => {
       uiOffloadStatus()
     );
   }
+});
+
+loadUnityUiBtn?.addEventListener("click", () => {
+  unityWebGLUiOverlay.enabled = true;
+  unityWebGLUiOverlay.load().catch(() => {});
 });
 
 sendDataBtn.addEventListener("click", () => {
@@ -471,6 +487,9 @@ function routeVideoToUiOffloadCompositor(peerId, videoElement) {
 
   console.log(`[UI Offload] Routed peer ${peerId} as ${role}.`);
   mountUiOffloadCompositor();
+  if (role === "world" && unityWebGLUiOverlay.enabled) {
+    unityWebGLUiOverlay.mount();
+  }
 }
 
 function resolveUiOffloadRole(peerId) {
@@ -647,15 +666,50 @@ function routeDataChannelMessage(message) {
     return;
   }
 
+  const semanticJson = extractSemanticUiJson(message);
+  if (!semanticJson) return;
+
+  if (unityWebGLUiOverlay.enabled) {
+    unityWebGLUiOverlay.receiveJson(semanticJson);
+    return;
+  }
+
   let meta;
   try {
-    meta = JSON.parse(message);
+    meta = JSON.parse(semanticJson);
   } catch {
     return; // not JSON we care about
   }
   if (!meta) return;
   if (meta.kind === "ui") uiRenderer.handle(meta);
   else if (meta.kind === "popup") handlePopupMessage(meta);
+}
+
+function extractSemanticUiJson(message) {
+  let meta;
+  try {
+    meta = JSON.parse(message);
+  } catch {
+    return null;
+  }
+  if (!meta) return null;
+
+  if (meta.kind === "key" && typeof meta.semanticUi === "string") {
+    return meta.semanticUi;
+  }
+
+  const semanticKinds = new Set([
+    "ui",
+    "popup",
+    "hud",
+    "dash",
+    "event",
+    "smokebreak-ui",
+    "smokebreak.hud",
+    "smokebreak.dash",
+  ]);
+
+  return semanticKinds.has(meta.kind) ? message : null;
 }
 
 function handlePopupMessage(message) {
@@ -715,5 +769,9 @@ sendDataBtn.classList.add("hidden");
 startLatencyBtn.classList.add("hidden");
 stopLatencyBtn.classList.add("hidden");
 
+
+if (unityWebGLUiOverlay.enabled) {
+  unityWebGLUiOverlay.load().catch(() => {});
+}
 
 console.log("Test page initialized. Enter WebSocket URL and connect.");
