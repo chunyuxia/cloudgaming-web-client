@@ -4,8 +4,8 @@ import { UI_OFFLOAD_CONFIG, matchUiOffloadPeerRole } from "./config.js";
 import { UiWorldCompositor } from "./compositor/UiWorldCompositor.js";
 import { UnityWebGLUiOverlay } from "./unityWebgl/UnityWebGLUiOverlay.js";
 
-// Which game's exported UI assets to load. Override with ?game=smokebreak in the URL.
-const GAME = new URLSearchParams(location.search).get("game") || "unchained";
+// Which game's exported UI assets to load. Override with ?game=smokebreak / ?game=unchained.
+const GAME = UI_OFFLOAD_CONFIG.game;
 
 // Generic UI-overlay renderer (kind:"ui"). Shares the same .video-stage the legacy
 // popup path uses, so both render over the stream and scale with it.
@@ -17,6 +17,7 @@ const unityWebGLUiOverlay = new UnityWebGLUiOverlay({
   buildUrl: UI_OFFLOAD_CONFIG.unityUiBuildUrl,
   buildName: UI_OFFLOAD_CONFIG.unityUiBuildName,
   bridgeObject: UI_OFFLOAD_CONFIG.unityUiBridgeObject,
+  compression: UI_OFFLOAD_CONFIG.unityUiCompression,
   blendMode: UI_OFFLOAD_CONFIG.unityUiBlendMode,
 });
 const uiOffloadPeerRoles = new Map();
@@ -229,8 +230,11 @@ closeWebRTCBtn.addEventListener("click", () => {
 document.getElementById("mergeStreamsBtn")?.addEventListener("click", () => {
   const merged = remergeExistingVideos();
   if (!merged) {
+    const requirement = unityWebGLUiOverlay.enabled
+      ? "need one world peer; Unity WebGL renders UI locally"
+      : "need one world peer and one UI peer";
     console.warn(
-      "[UI Offload] Merge incomplete — need one world peer and one UI peer. Status:",
+      `[UI Offload] Merge incomplete — ${requirement}. Status:`,
       uiOffloadStatus()
     );
   }
@@ -478,6 +482,12 @@ function routeVideoToUiOffloadCompositor(peerId, videoElement) {
     return;
   }
 
+  if (unityWebGLUiOverlay.enabled && role === "ui") {
+    hideDebugVideo(videoElement);
+    console.log(`[UI Offload] Ignoring separate UI video peer ${peerId}; Unity WebGL renders UI locally.`);
+    return;
+  }
+
   uiOffloadPeerRoles.set(peerId, role);
   if (role === "world") {
     uiWorldCompositor.setWorldVideo(videoElement, peerId);
@@ -505,7 +515,17 @@ function resolveUiOffloadRole(peerId) {
 }
 
 function mountUiOffloadCompositor() {
-  if (!uiWorldCompositor.isReady()) return;
+  if (unityWebGLUiOverlay.enabled) {
+    const worldVideo = uiWorldCompositor.getScaleReference();
+    if (!worldVideo) return false;
+    const stage = ensureStageForVideo(worldVideo);
+    unityWebGLUiOverlay.mount();
+    applyStageScale(stage, worldVideo);
+    console.log("[UI Offload] World video active. Unity WebGL UI overlay is mounted on the world stage.");
+    return true;
+  }
+
+  if (!uiWorldCompositor.isReady()) return false;
 
   const mounted = uiWorldCompositor.mountInto(ensureStage());
   if (mounted) {
@@ -514,6 +534,7 @@ function mountUiOffloadCompositor() {
       `[UI Offload] Compositing active. UI blend mode: ${UI_OFFLOAD_CONFIG.uiBlendMode}.`
     );
   }
+  return mounted;
 }
 
 function resetUiOffloadRouting() {
@@ -533,10 +554,11 @@ function remergeExistingVideos() {
     const peerId = video.id.replace(/^video-/, "");
     routeVideoToUiOffloadCompositor(peerId, video);
   }
-  console.log(
-    `[UI Offload] remerge: ${videos.length} video(s), ready=${uiWorldCompositor.isReady()}.`
-  );
-  return uiWorldCompositor.isReady();
+  const ready = unityWebGLUiOverlay.enabled
+    ? Boolean(uiWorldCompositor.getScaleReference())
+    : uiWorldCompositor.isReady();
+  console.log(`[UI Offload] remerge: ${videos.length} video(s), ready=${ready}.`);
+  return ready;
 }
 
 // Force a specific world/UI pairing regardless of peerId naming.
@@ -588,13 +610,10 @@ let activePopupId = null;
 function getStreamVideoEl() {
   const c = document.getElementById("remoteVideosContainer");
   if (!c) return null;
-  return (
-    uiWorldCompositor.getScaleReference() ||
-    c.querySelector(".video-stage .world-layer") ||
-    c.querySelector('video[id^="video-"]') ||
-    c.querySelector("video") ||
-    null
-  );
+  const worldVideo = uiWorldCompositor.getScaleReference() || c.querySelector(".video-stage .world-layer");
+  if (worldVideo) return worldVideo;
+  const videos = [...c.querySelectorAll('video[id^="video-"]')];
+  return videos.find((video) => resolveUiOffloadRole(video.id.replace(/^video-/, "")) === "world") || videos[0] || null;
 }
 
 // Relative scale: expose 1% units of the video's size as CSS vars on the stage so
@@ -611,22 +630,11 @@ function applyStageScale(stage, ref) {
 // video isn't ready yet, so the popup still renders.
 function ensureStage() {
   const video = getStreamVideoEl();
-  if (video) {
-    let stage = video.closest(".video-stage");
-    if (!stage) {
-      stage = document.createElement("div");
-      stage.className = "video-stage";
-      video.parentNode.insertBefore(stage, video);
-      stage.appendChild(video);
-    }
-    stage.classList.remove("placeholder");
-    applyStageScale(stage, video);
-    if (!video._popupRO && typeof ResizeObserver !== "undefined") {
-      video._popupRO = new ResizeObserver(() => applyStageScale(stage, video));
-      video._popupRO.observe(video);
-    }
-    return stage;
-  }
+  if (video) return ensureStageForVideo(video);
+
+  // In Unity-WebGL UI mode, avoid creating a separate placeholder panel. The UI overlay
+  // should appear only after the world video exists, otherwise it looks like a second window.
+  if (unityWebGLUiOverlay.enabled) return null;
 
   // No video yet — a sized placeholder keeps the popup visible and scaled.
   const container = document.getElementById("remoteVideosContainer") || document.body;
@@ -640,8 +648,52 @@ function ensureStage() {
   return stage;
 }
 
+function ensureStageForVideo(video) {
+  let stage = video.closest(".video-stage");
+  if (!stage) {
+    stage = document.createElement("div");
+    stage.className = "video-stage";
+    video.parentNode.insertBefore(stage, video);
+    stage.appendChild(video);
+  }
+  stage.classList.remove("placeholder");
+  if (unityWebGLUiOverlay.enabled) {
+    stage.classList.add("unity-webgl-compositor");
+    video.classList.add("world-layer");
+    Object.assign(video.style, {
+      display: "block",
+      width: "100%",
+      height: "100%",
+      objectFit: "fill",
+    });
+  }
+  applyStageScale(stage, video);
+  if (!video._popupRO && typeof ResizeObserver !== "undefined") {
+    video._popupRO = new ResizeObserver(() => applyStageScale(stage, video));
+    video._popupRO.observe(video);
+  }
+  cleanupPlaceholderStages(stage);
+  return stage;
+}
+
+function cleanupPlaceholderStages(keepStage = null) {
+  document.querySelectorAll(".video-stage.placeholder").forEach((stage) => {
+    if (stage !== keepStage) stage.remove();
+  });
+}
+
+function hideDebugVideo(videoElement) {
+  const wrapper = videoElement?.closest(".video-wrapper, .remote-video-wrapper, .video-container") || videoElement?.parentElement;
+  if (wrapper && !wrapper.classList.contains("video-stage")) {
+    wrapper.style.display = "none";
+  } else if (videoElement) {
+    videoElement.style.display = "none";
+  }
+}
+
 function getPopupOverlay() {
   const stage = ensureStage();
+  if (!stage) return null;
   let overlay = document.getElementById("popupOverlay");
   if (!overlay) {
     overlay = document.createElement("div");
@@ -701,6 +753,7 @@ function extractSemanticUiJson(message) {
   const semanticKinds = new Set([
     "ui",
     "popup",
+    "passive_popup",
     "hud",
     "dash",
     "event",
@@ -733,6 +786,7 @@ function handlePopupMessage(message) {
 
 function showPopup(meta) {
   const overlay = getPopupOverlay();
+  if (!overlay) return;
   activePopupId = meta.id;
   overlay.innerHTML = `
     <div class="semantic-popup" role="dialog" aria-live="polite">
@@ -771,7 +825,9 @@ stopLatencyBtn.classList.add("hidden");
 
 
 if (unityWebGLUiOverlay.enabled) {
-  unityWebGLUiOverlay.load().catch(() => {});
+  // The Unity UI overlay loads after the world video stage exists. This prevents a
+  // standalone placeholder canvas from appearing next to the world stream.
+  cleanupPlaceholderStages();
 }
 
 console.log("Test page initialized. Enter WebSocket URL and connect.");

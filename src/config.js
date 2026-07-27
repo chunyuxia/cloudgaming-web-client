@@ -13,7 +13,18 @@ function boolParam(name, defaultValue = false) {
   return ["1", "true", "yes", "on"].includes(value.toLowerCase());
 }
 
+export const GAME = (params.get("game") || "unchained").toLowerCase();
+
+function defaultUnityUiBuildName(game) {
+  if (game === "smokebreak") return "smokebreak-ui-webgl";
+  if (game === "unchained") return "unchained-ui-webgl";
+  return `${game}-ui-webgl`;
+}
+
+const defaultUnityBuildName = defaultUnityUiBuildName(GAME);
+
 export const UI_OFFLOAD_CONFIG = {
+  game: GAME,
   worldPeerMatch: splitMatcher(
     params.get("worldPeerMatch") || params.get("worldPeer"),
     "world,cloud,remote"
@@ -26,9 +37,10 @@ export const UI_OFFLOAD_CONFIG = {
   fallbackAssignment: params.get("uiOffloadFallback") !== "false",
   renderDataUi: params.get("renderDataUi") !== "false",
   unityWebglUi: boolParam("unityUi", false),
-  unityUiBuildUrl: params.get("unityUiBuildUrl") || "./smokebreak-ui-webgl/Build",
-  unityUiBuildName: params.get("unityUiBuildName") || "SmokeBreakUIClientWebGL",
+  unityUiBuildUrl: params.get("unityUiBuildUrl") || `./${defaultUnityBuildName}/Build`,
+  unityUiBuildName: params.get("unityUiBuildName") || defaultUnityBuildName,
   unityUiBridgeObject: params.get("unityUiBridgeObject") || "SemanticUiBridge",
+  unityUiCompression: params.get("unityUiCompression") || "br",
   unityUiBlendMode: params.get("unityUiBlendMode") || "screen",
 };
 

@@ -45,16 +45,20 @@ Peer role matching can be overridden with URL parameters:
 
 ## Unity WebGL UI Overlay
 
-The web client can also render the semantic UI locally inside the browser with a Unity WebGL UI client. Build the SmokeBreak UI client from Unity into:
+The web client can also render the semantic UI locally inside the browser with a Unity WebGL UI client. Build each game's Unity UI client into the matching public folder:
 
 ```text
 public/smokebreak-ui-webgl
+public/unchained-ui-webgl
 ```
 
-Then open the web client with:
+The SmokeBreak WebGL build is small enough to keep in this repository. The Unchained WebGL build is generated locally for now because its compressed data file is larger than GitHub's regular 100 MB file limit; host it separately or use Git LFS if it needs to be public.
+
+Then open the web client with the matching game parameter:
 
 ```text
 ?unityUi=1&game=smokebreak
+?unityUi=1&game=unchained
 ```
 
 In this mode the browser receives the cloud world video and forwards semantic UI JSON into the embedded Unity WebGL canvas. This removes the separate local UI-video stream and is the preferred mobile-browser direction.

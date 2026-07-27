@@ -25,3 +25,5 @@ dist-ssr
 
 # Local AI/editor tooling
 .claude/
+# Generated locally; Unchained WebGL data exceeds GitHub regular file limit
+public/unchained-ui-webgl/

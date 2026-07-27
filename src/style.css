@@ -159,6 +159,22 @@ select:focus {
   z-index: 2;
   pointer-events: none;
 }
+.video-stage.unity-webgl-compositor {
+  overflow: hidden;
+  background: #000;
+  display: block;
+  width: min(100%, 960px);
+  aspect-ratio: 16 / 9;
+}
+.video-stage.unity-webgl-compositor .world-layer {
+  position: relative;
+  z-index: 1;
+  box-sizing: border-box;
+  border: 1px solid #bbb;
+}
+.video-stage.unity-webgl-compositor .unity-webgl-ui-layer {
+  z-index: 5;
+}
 .video-stage.placeholder {
   width: 320px;
   height: 180px;

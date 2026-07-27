@@ -3,7 +3,8 @@ export class UnityWebGLUiOverlay {
     this.enabled = Boolean(options.enabled);
     this.getStage = options.getStage;
     this.buildUrl = stripTrailingSlash(options.buildUrl || "./smokebreak-ui-webgl/Build");
-    this.buildName = options.buildName || "SmokeBreakUIClientWebGL";
+    this.buildName = options.buildName || "smokebreak-ui-webgl";
+    this.compressionSuffix = compressionSuffix(options.compression);
     this.bridgeObject = options.bridgeObject || "SemanticUiBridge";
     this.blendMode = options.blendMode || "screen";
 
@@ -42,15 +43,20 @@ export class UnityWebGLUiOverlay {
 
   async load() {
     if (!this.enabled) return null;
-    this.mount();
+    const layer = this.mount();
+    if (!layer || !this.canvas) {
+      // Wait until the world-video stage exists. This avoids creating/loading a
+      // standalone black Unity canvas next to the actual stream.
+      return null;
+    }
     if (this.instance) return this.instance;
     if (this.loadingPromise) return this.loadingPromise;
 
     const loaderUrl = `${this.buildUrl}/${this.buildName}.loader.js`;
     const config = {
-      dataUrl: `${this.buildUrl}/${this.buildName}.data`,
-      frameworkUrl: `${this.buildUrl}/${this.buildName}.framework.js`,
-      codeUrl: `${this.buildUrl}/${this.buildName}.wasm`,
+      dataUrl: `${this.buildUrl}/${this.buildName}.data${this.compressionSuffix}`,
+      frameworkUrl: `${this.buildUrl}/${this.buildName}.framework.js${this.compressionSuffix}`,
+      codeUrl: `${this.buildUrl}/${this.buildName}.wasm${this.compressionSuffix}`,
       streamingAssetsUrl: `${this.buildUrl.replace(/\/Build$/, "")}/StreamingAssets`,
       companyName: "Applewood Studios",
       productName: "SmokeBreak UI Client",
@@ -88,11 +94,11 @@ export class UnityWebGLUiOverlay {
 
   receiveJson(json) {
     if (!this.enabled || !json) return false;
-    this.mount();
+    const layer = this.mount();
 
     if (!this.instance) {
       this.pendingMessages.push(json);
-      this.load().catch(() => {});
+      if (layer) this.load().catch(() => {});
       return true;
     }
 
@@ -113,6 +119,12 @@ export class UnityWebGLUiOverlay {
       console.warn("[UnityWebGLUiOverlay] SendMessage failed:", error, json);
     }
   }
+}
+
+function compressionSuffix(value) {
+  if (!value || value === "none" || value === "false" || value === "0") return "";
+  const normalized = String(value).trim().replace(/^\./, "");
+  return normalized ? `.${normalized}` : "";
 }
 
 function loadScript(src) {
