@@ -1,14 +1,19 @@
 # Cloud Gaming Semantic UI Web Client
 
-Browser client for the Semantic UI Offloading cloud-gaming demo. It connects to the Unity signaling server, receives remote WebRTC streams, and can merge a cloud-rendered world stream with a locally rendered UI stream.
+Browser client for the SmokeBreak Semantic UI Offloading demo. The cloud Unity game streams world-only video, while the browser renders the SmokeBreak UI locally with a Unity WebGL UI client from semantic UI updates.
 
-## Features
+## What This Demo Shows
 
-- WebRTC signaling through `wss://unity-signaling-server.onrender.com`
-- Remote video display for Unity world/UI streams
-- `Merge UI + World Streams` compositor for semantic UI offloading demos
-- Data-channel utilities for latency/input experiments
-- Optional semantic UI overlay renderer for JSON-driven UI messages
+- The cloud/full SmokeBreak game remains authoritative and streams the world layer.
+- Semantic UI JSON arrives through the WebRTC data channel.
+- The browser forwards those UI updates into the embedded SmokeBreak Unity WebGL UI client.
+- The locally rendered UI is composited over the cloud-rendered world video.
+
+The default page is now equivalent to:
+
+```text
+?unityUi=1&game=smokebreak&unityUiCompression=none
+```
 
 ## Local Development
 
@@ -28,41 +33,21 @@ npm run preview
 
 ## Demo Usage
 
-1. Start the Unity world sender, for example `smokebreak-world`.
-2. Start the Unity UI sender, for example `smokebreak-ui`.
-3. Open this web client.
-4. Click **Connect WebSocket**.
-5. Once both remote videos appear, click **Merge UI + World Streams**.
+1. Start the SmokeBreak cloud/world Unity sender, for example `smokebreak-world`.
+2. Open this web client.
+3. Click **Connect WebSocket**.
+4. When the world stream appears, the browser loads the SmokeBreak Unity WebGL UI overlay automatically.
+5. Click **Merge UI + World Streams** if needed to enter the stitched demo view.
 
-Peer role matching can be overridden with URL parameters:
-
-```text
-?worldPeerMatch=world&uiPeerMatch=ui
-?game=smokebreak
-?game=unchained
-```
-
-
-## Unity WebGL UI Overlay
-
-The web client can also render the semantic UI locally inside the browser with a Unity WebGL UI client. Build each game's Unity UI client into the matching public folder:
+Useful optional URL overrides:
 
 ```text
-public/smokebreak-ui-webgl
-public/unchained-ui-webgl
+?worldPeerMatch=smokebreak-world
+?unityUi=1&game=smokebreak&unityUiCompression=none
 ```
-
-The SmokeBreak WebGL build is small enough to keep in this repository. The Unchained WebGL build is generated locally for now because its compressed data file is larger than GitHub's regular 100 MB file limit; host it separately or use Git LFS if it needs to be public.
-
-Then open the web client with the matching game parameter:
-
-```text
-?unityUi=1&game=smokebreak
-?unityUi=1&game=unchained
-```
-
-In this mode the browser receives the cloud world video and forwards semantic UI JSON into the embedded Unity WebGL canvas. This removes the separate local UI-video stream and is the preferred mobile-browser direction.
 
 ## GitHub Pages
 
-This repository includes a GitHub Actions workflow that builds the Vite app and deploys it to GitHub Pages. After pushing to GitHub, enable Pages with **Source: GitHub Actions** in the repository settings if GitHub does not enable it automatically.
+This repository is configured as a SmokeBreak-only public demo. The included SmokeBreak WebGL UI build is uncompressed, so GitHub Pages can serve it without custom Brotli headers.
+
+After pushing to GitHub, enable Pages with **Source: GitHub Actions** in the repository settings if GitHub does not enable it automatically.

@@ -13,15 +13,19 @@ function boolParam(name, defaultValue = false) {
   return ["1", "true", "yes", "on"].includes(value.toLowerCase());
 }
 
-export const GAME = (params.get("game") || "unchained").toLowerCase();
+export const GAME = (params.get("game") || "smokebreak").toLowerCase();
 
 function defaultUnityUiBuildName(game) {
   if (game === "smokebreak") return "smokebreak-ui-webgl";
-  if (game === "unchained") return "unchained-ui-webgl";
   return `${game}-ui-webgl`;
 }
 
+function defaultUnityUiCompression() {
+  return "none";
+}
+
 const defaultUnityBuildName = defaultUnityUiBuildName(GAME);
+const defaultUnityCompression = defaultUnityUiCompression();
 
 export const UI_OFFLOAD_CONFIG = {
   game: GAME,
@@ -36,11 +40,11 @@ export const UI_OFFLOAD_CONFIG = {
   uiBlendMode: params.get("uiBlendMode") || "screen",
   fallbackAssignment: params.get("uiOffloadFallback") !== "false",
   renderDataUi: params.get("renderDataUi") !== "false",
-  unityWebglUi: boolParam("unityUi", false),
+  unityWebglUi: boolParam("unityUi", true),
   unityUiBuildUrl: params.get("unityUiBuildUrl") || `./${defaultUnityBuildName}/Build`,
   unityUiBuildName: params.get("unityUiBuildName") || defaultUnityBuildName,
   unityUiBridgeObject: params.get("unityUiBridgeObject") || "SemanticUiBridge",
-  unityUiCompression: params.get("unityUiCompression") || "br",
+  unityUiCompression: params.get("unityUiCompression") || defaultUnityCompression,
   unityUiBlendMode: params.get("unityUiBlendMode") || "screen",
 };
 
