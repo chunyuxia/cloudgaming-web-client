@@ -33,11 +33,24 @@ npm run preview
 
 ## Demo Usage
 
-1. Start the SmokeBreak cloud/world Unity sender, for example `smokebreak-world`.
-2. Open this web client.
-3. Click **Connect WebSocket**.
-4. When the world stream appears, the browser loads the SmokeBreak Unity WebGL UI overlay automatically.
-5. Click **Merge UI + World Streams** if needed to enter the stitched demo view.
+### 1. Start the SmokeBreak cloud/world sender
+
+In the SmokeBreak Unity project:
+
+1. Open the gameplay scene, usually `Tutorial.unity`.
+2. Run **Tools > UI Client > Live Demo > Configure Active Scene as Cloud World Sender**.
+3. Press **Play** in Unity.
+
+This creates the WebRTC peer named `smokebreak-world`. It runs the full game logic, streams world-only video, and sends semantic UI deltas over the data channel.
+
+### 2. Open the browser client
+
+1. Open this GitHub Pages site.
+2. Click **Connect WebSocket**.
+3. When the world stream appears, the browser loads the SmokeBreak Unity WebGL UI overlay automatically.
+4. Click **Merge UI + World Streams** if needed to enter the stitched demo view.
+
+For a standalone UI asset check, click **Load Unity WebGL UI Overlay** before connecting the world sender.
 
 Useful optional URL overrides:
 

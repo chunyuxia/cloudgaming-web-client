@@ -242,7 +242,7 @@ document.getElementById("mergeStreamsBtn")?.addEventListener("click", () => {
 
 loadUnityUiBtn?.addEventListener("click", () => {
   unityWebGLUiOverlay.enabled = true;
-  unityWebGLUiOverlay.load().catch(() => {});
+  unityWebGLUiOverlay.load({ allowStandalone: true }).catch(() => {});
 });
 
 sendDataBtn.addEventListener("click", () => {

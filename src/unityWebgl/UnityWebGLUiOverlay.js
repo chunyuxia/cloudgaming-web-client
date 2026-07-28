@@ -4,6 +4,7 @@ export class UnityWebGLUiOverlay {
     this.getStage = options.getStage;
     this.buildUrl = stripTrailingSlash(options.buildUrl || "./smokebreak-ui-webgl/Build");
     this.buildName = options.buildName || "smokebreak-ui-webgl";
+    this.buildUrlFallbacks = buildUrlFallbacks(this.buildUrl, this.buildName);
     this.compressionSuffix = compressionSuffix(options.compression);
     this.bridgeObject = options.bridgeObject || "SemanticUiBridge";
     this.blendMode = options.blendMode || "screen";
@@ -15,10 +16,10 @@ export class UnityWebGLUiOverlay {
     this.pendingMessages = [];
   }
 
-  mount() {
+  mount(options = {}) {
     if (!this.enabled) return null;
 
-    const stage = this.getStage?.();
+    const stage = this.getStage?.() || (options.allowStandalone ? this.ensureStandaloneStage() : null);
     if (!stage) return null;
 
     if (!this.layer) {
@@ -41,9 +42,9 @@ export class UnityWebGLUiOverlay {
     return this.layer;
   }
 
-  async load() {
+  async load(options = {}) {
     if (!this.enabled) return null;
-    const layer = this.mount();
+    const layer = this.mount(options);
     if (!layer || !this.canvas) {
       // Wait until the world-video stage exists. This avoids creating/loading a
       // standalone black Unity canvas next to the actual stream.
@@ -52,27 +53,7 @@ export class UnityWebGLUiOverlay {
     if (this.instance) return this.instance;
     if (this.loadingPromise) return this.loadingPromise;
 
-    const loaderUrl = `${this.buildUrl}/${this.buildName}.loader.js`;
-    const config = {
-      dataUrl: `${this.buildUrl}/${this.buildName}.data${this.compressionSuffix}`,
-      frameworkUrl: `${this.buildUrl}/${this.buildName}.framework.js${this.compressionSuffix}`,
-      codeUrl: `${this.buildUrl}/${this.buildName}.wasm${this.compressionSuffix}`,
-      streamingAssetsUrl: `${this.buildUrl.replace(/\/Build$/, "")}/StreamingAssets`,
-      companyName: "Applewood Studios",
-      productName: "SmokeBreak UI Client",
-      productVersion: "0.1",
-      matchWebGLToCanvasSize: true,
-    };
-
-    this.loadingPromise = loadScript(loaderUrl)
-      .then(() => {
-        if (typeof createUnityInstance !== "function") {
-          throw new Error("Unity WebGL loader did not expose createUnityInstance");
-        }
-        return createUnityInstance(this.canvas, config, (progress) => {
-          this.layer?.style.setProperty("--unity-load-progress", String(progress));
-        });
-      })
+    this.loadingPromise = this.loadFromAvailableBuildUrl()
       .then((instance) => {
         this.instance = instance;
         this.flush();
@@ -81,7 +62,7 @@ export class UnityWebGLUiOverlay {
       })
       .catch((error) => {
         console.warn(
-          `[UnityWebGLUiOverlay] Could not load Unity WebGL UI build at ${loaderUrl}. ` +
+          "[UnityWebGLUiOverlay] Could not load Unity WebGL UI build. " +
             "Build it from Unity first, then reload with ?unityUi=1.",
           error
         );
@@ -90,6 +71,56 @@ export class UnityWebGLUiOverlay {
       });
 
     return this.loadingPromise;
+  }
+
+
+  ensureStandaloneStage() {
+    const container = document.getElementById("remoteVideosContainer");
+    if (!container) return null;
+
+    let stage = document.getElementById("unityWebglStandaloneStage");
+    if (!stage) {
+      stage = document.createElement("div");
+      stage.id = "unityWebglStandaloneStage";
+      stage.className = "video-stage unity-webgl-compositor unity-webgl-standalone";
+      container.appendChild(stage);
+    }
+    return stage;
+  }
+
+  async loadFromAvailableBuildUrl() {
+    let lastError = null;
+    for (const buildUrl of this.buildUrlFallbacks) {
+      try {
+        return await this.loadFromBuildUrl(buildUrl);
+      } catch (error) {
+        lastError = error;
+        console.warn(`[UnityWebGLUiOverlay] Build URL failed: ${buildUrl}`, error);
+      }
+    }
+    throw lastError || new Error("No Unity WebGL build URL could be loaded");
+  }
+
+  async loadFromBuildUrl(buildUrl) {
+    const loaderUrl = `${buildUrl}/${this.buildName}.loader.js`;
+    const config = {
+      dataUrl: `${buildUrl}/${this.buildName}.data${this.compressionSuffix}`,
+      frameworkUrl: `${buildUrl}/${this.buildName}.framework.js${this.compressionSuffix}`,
+      codeUrl: `${buildUrl}/${this.buildName}.wasm${this.compressionSuffix}`,
+      streamingAssetsUrl: `${buildUrl.replace(/\/Build$/, "")}/StreamingAssets`,
+      companyName: "Applewood Studios",
+      productName: "SmokeBreak UI Client",
+      productVersion: "0.1",
+      matchWebGLToCanvasSize: true,
+    };
+
+    await loadScript(loaderUrl);
+    if (typeof createUnityInstance !== "function") {
+      throw new Error("Unity WebGL loader did not expose createUnityInstance");
+    }
+    return createUnityInstance(this.canvas, config, (progress) => {
+      this.layer?.style.setProperty("--unity-load-progress", String(progress));
+    });
   }
 
   receiveJson(json) {
@@ -119,6 +150,13 @@ export class UnityWebGLUiOverlay {
       console.warn("[UnityWebGLUiOverlay] SendMessage failed:", error, json);
     }
   }
+}
+
+function buildUrlFallbacks(buildUrl, buildName) {
+  const urls = [buildUrl];
+  const publicBuildUrl = `./public/${buildName}/Build`;
+  if (!urls.includes(publicBuildUrl)) urls.push(publicBuildUrl);
+  return urls;
 }
 
 function compressionSuffix(value) {

@@ -181,6 +181,21 @@ select:focus {
   background: #0d1b24;
   border: 1px solid #bbb;
 }
+
+.video-stage.unity-webgl-standalone {
+  margin: 10px auto;
+}
+.video-stage.unity-webgl-standalone::before {
+  content: "SmokeBreak Unity WebGL UI Overlay";
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  z-index: 1;
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 14px;
+  line-height: 1.2;
+  pointer-events: none;
+}
 /* Generic UI-overlay root (kind:"ui"): a full-size layer over the stream that hosts
    HUD / menus / dialogue rendered from the server's UI deltas. Nodes inside position
    themselves (absolute from a rect, or via exported CSS classes), so the root just
